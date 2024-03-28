@@ -1,0 +1,46 @@
+---
+title: "Analysis"
+author: "Patrick"
+date: "2024-03-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(beeswarm)
+library(readxl)
+library(janitor)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+scores <- read_excel("PH_Inspections_data_dotgov_27JUN2023.xlsx") %>% 
+  clean_names()
+```
+
+```{r}
+nycha_scores <- scores %>% filter(pha_name == "New York City Housing Authority") %>% 
+  mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
+         pass = if_else(raw_score >= 60, T, F),
+         h_s_score = str_replace_all(inspection_score, "[*0-9]", "")
+  )
+
+write.csv(nycha_scores, "nycha_scores.csv")
+```
+
+```{r}
+
+index <- rep(0,100)
+values <- nycha_scores$raw_score
+
+test <- swarmy(values, index, side = 0, compact = T)
+
+plot(test)
+points(test)
+
+write.csv(test, "test.csv")
+
+```
+
