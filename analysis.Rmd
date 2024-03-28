@@ -10,6 +10,8 @@ library(tidyverse)
 library(beeswarm)
 library(readxl)
 library(janitor)
+library(stringdist)
+library(fuzzyjoin)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -65,4 +67,55 @@ nycha_scores %>%
 
 
 ```
+
+```{r}
+
+nhpd_reac <-read_excel("active_ph_pbs8_nystate.xlsx") %>% 
+  clean_names()
+  
+nyc_nhpd <- filter(nhpd_reac, county %in% c("Kings", "Richmond", "New York", "Bronx", "Queens"))
+
+nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Authority", "NEW YORK CITY HOUSING AUTHORITY")) %>% 
+  mutate(property_name = case_when(
+    property_name == "RED HOOK I EAST" ~ "red hook i (east)",
+    property_name == "AMSTERDAM" & nhpd_property_id == "1072768" ~ "amsterdam addition",
+    property_name == "BAYVIEW HOUSES" ~ "bay view",
+    T ~ property_name
+  ))
+
+hud_nhpd_join <- left_join(
+          nycha_scores %>% mutate(development_name = tolower(development_name)),
+          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
+          by = c("development_name" = "property_name", "inspection_date" = "last_reac_date")
+)
+
+nomatch_hud <- anti_join(
+          nycha_scores %>% mutate(development_name = tolower(development_name)),
+          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
+          by = c("development_name" = "property_name")
+)
+
+nomatch_nhpd <- anti_join(
+          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
+          nycha_scores %>% mutate(development_name = tolower(development_name)),
+          by = c("property_name" = "development_name")
+)
+
+```
+
+
+```{r}
+stringdistmatrix(nycha_scores$development_name, nycha_nhpd$property_name, method = "jw")
+
+fuzzy_join <- stringdist_join(nycha_scores, nycha_nhpd,
+          by = c("development_name" = "property_name"),
+          mode = "left",
+          max_dist = 2,
+          ignore_case = T,
+          distance_col = "dist") %>% 
+  select(development_name, property_name, dist)
+
+
+```
+
 
