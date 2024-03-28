@@ -24,23 +24,45 @@ scores <- read_excel("PH_Inspections_data_dotgov_27JUN2023.xlsx") %>%
 nycha_scores <- scores %>% filter(pha_name == "New York City Housing Authority") %>% 
   mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
          pass = if_else(raw_score >= 60, T, F),
-         h_s_score = str_replace_all(inspection_score, "[*0-9]", "")
+         h_s_score = toupper(str_replace_all(inspection_score, "[*0-9]", "")),
+         smoke_detectors = if_else(str_detect(inspection_score, "\\*"), "Yes", "No")
   )
 
-write.csv(nycha_scores, "nycha_scores.csv")
+write_csv(nycha_scores, "nycha_scores.csv")
 ```
 
 ```{r}
 
-index <- rep(0,100)
-values <- nycha_scores$raw_score
+nycha_bees <- beeswarm(
+  raw_score ~ axis,
+  data = nycha_scores %>% mutate(axis = 0),
+  method = "compactswarm",
+  cex = 1,
+  vertical = F,
+  pch = 16,
+)
 
-test <- swarmy(values, index, side = 0, compact = T)
+rownames(nycha_bees) <- NULL
 
-plot(test)
-points(test)
 
-write.csv(test, "test.csv")
+nycha_scores_beeswarm <- bind_cols(nycha_bees, nycha_scores) %>% 
+  select(x = y, y = x, development_name, pass, raw_score) #this is dumb but makes is a lot easier for DW to read. Switching it to horizontal by just renaming and reordering the x and y columns
+
+write_csv(nycha_scores_beeswarm, "scores_swarm_dw.csv")
+
+```
+
+```{r}
+
+nycha_scores %>% 
+  select(`Development Name` = development_name,
+         `Borough` = development_city,
+         `Units` = development_acc_unit_count,
+         `Overall Score` = raw_score,
+         `Health & Safety Scores` = h_s_score,
+         `Smoke Detector Deficiencies` = smoke_detectors) %>% 
+  write_csv("scores_table_dw.csv")
+
 
 ```
 
