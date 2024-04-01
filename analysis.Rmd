@@ -75,37 +75,32 @@ nhpd_reac <-read_excel("active_ph_pbs8_nystate.xlsx") %>%
   
 nyc_nhpd <- filter(nhpd_reac, county %in% c("Kings", "Richmond", "New York", "Bronx", "Queens"))
 
-nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Authority", "NEW YORK CITY HOUSING AUTHORITY")) %>% 
+nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Authority", "NEW YORK CITY HOUSING AUTHORITY", "CORNELL PACE INC")) %>% 
   mutate(property_name = case_when(
     property_name == "RED HOOK I EAST" ~ "red hook i (east)",
     property_name == "AMSTERDAM" & nhpd_property_id == "1072768" ~ "amsterdam addition",
     property_name == "BAYVIEW HOUSES" ~ "bay view",
+    property_name == "BCH41 ST BCH CHANNEL DR" ~ "Bch.41 St/Bch. Channel Dr",
+    property_name == "SEN ROBERT F WAGNER SR" ~ "Sen. Robert F. Wagner Sr.",
+    property_name == "OCEAN HILL APARTMENTS" ~ "Ocean Hill apts",
+    property_name == "WILLIAM REID APARTMENTS" ~ "William Reid Apts",
+    property_name == "LANGSTON HUGHES APARTMENTS" ~ "Langston Hughes Apts",
+    property_name == "UPACA URA SITE 5" ~ "U.P.A.C.A. Ura (Site 5)",
+    property_name == "MARLBORO HOUSES" ~ "Marlboro",
+    property_name == "BUSHWICK HOUSES" ~ "Bushwick",
+    property_name == "160 MADISON AVENUE APARTMENTS" ~ "Rutgers",
+    property_name == "FREDERICK SAMUEL PHASE XII" ~ "Frederick Samuel (city)",
+    property_name == "PROSPECT PLAZA SITE I" ~ "Prospect Plaza Phase I",
+    property_name == "PROSPECT PLAZA II" ~ "Prospect Plaza Phase Ii",
+    property_name == "TRINITY WEST HARLEM PHASE TWO LP" ~ "Randolph South",
+    
     T ~ property_name
   ))
-
-hud_nhpd_join <- left_join(
-          nycha_scores %>% mutate(development_name = tolower(development_name)),
-          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
-          by = c("development_name" = "property_name", "inspection_date" = "last_reac_date")
-)
-
-nomatch_hud <- anti_join(
-          nycha_scores %>% mutate(development_name = tolower(development_name)),
-          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
-          by = c("development_name" = "property_name")
-)
-
-nomatch_nhpd <- anti_join(
-          nycha_nhpd %>% mutate(property_name = tolower(property_name)),
-          nycha_scores %>% mutate(development_name = tolower(development_name)),
-          by = c("property_name" = "development_name")
-)
 
 ```
 
 
 ```{r}
-stringdistmatrix(nycha_scores$development_name, nycha_nhpd$property_name, method = "jw")
 
 fuzzy_join <- stringdist_join(nycha_scores, nycha_nhpd,
           by = c("development_name" = "property_name"),
@@ -113,9 +108,31 @@ fuzzy_join <- stringdist_join(nycha_scores, nycha_nhpd,
           max_dist = 2,
           ignore_case = T,
           distance_col = "dist") %>% 
-  select(development_name, property_name, dist)
-
+  group_by(development_name) %>%
+  filter(dist == min(dist)) %>%
+  ungroup()
 
 ```
 
+```{r}
+map_clean <- fuzzy_join %>% 
+  mutate(second_score = as.integer(str_replace_all(reac_score_2, "[*abc]", "")),
+         second_pass = if_else(reac_score_2 >= 60, T, F),
+         second_h_s_score = toupper(str_replace_all(reac_score_2, "[*0-9]", "")),
+         second_smoke_detectors = if_else(str_detect(reac_score_2, "\\*"), "Yes", "No"),
+         third_score = as.integer(str_replace_all(reac_score_3, "[*abc]", "")),
+         third_pass = if_else(reac_score_3 >= 60, T, F),
+         third_h_s_score = toupper(str_replace_all(reac_score_3, "[*0-9]", "")),
+         third_smoke_detectors = if_else(str_detect(reac_score_3, "\\*"), "Yes", "No")
+  ) 
+
+map_clean %>% 
+  select(development_name, borough = development_city, development_acc_unit_count,
+         inspection_date, raw_score, h_s_score, smoke_detectors, reac_date_2,
+         second_score, second_h_s_score, second_smoke_detectors, reac_date_3,
+         third_score, third_h_s_score, third_smoke_detectors,
+         latitude, longitude) %>% 
+  write_csv("scores_map_dw.csv")
+
+```
 
