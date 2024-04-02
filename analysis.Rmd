@@ -97,6 +97,8 @@ nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Author
     T ~ property_name
   ))
 
+#boulevard houses in NHPD but not hud data
+
 ```
 
 
@@ -111,6 +113,17 @@ fuzzy_join <- stringdist_join(nycha_scores, nycha_nhpd,
   group_by(development_name) %>%
   filter(dist == min(dist)) %>%
   ungroup()
+
+
+anti_join <- stringdist_join(nycha_nhpd, nycha_scores,
+          by = c("property_name" = "development_name"),
+          mode = "anti",
+          max_dist = 2,
+          ignore_case = T,
+          distance_col = "dist") %>% 
+  ungroup()
+
+#all except hobbs ciena are additional NYCHA
 
 ```
 
