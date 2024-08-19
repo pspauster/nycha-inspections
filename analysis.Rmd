@@ -18,12 +18,17 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-scores <- read_excel("PH_Inspections_data_dotgov_27JUN2023.xlsx") %>% 
+scores23 <- read_excel("PH_Inspections_data_dotgov_27JUN2023.xlsx") %>% 
   clean_names()
+
+scores24 <- read_excel("PH_UPCSInspections_Data_dotgov_19APR2024.xlsx") %>% 
+  filter(`PHA Code` == "NY005")
+
+test <- full_join(PH_Inspections_data_dotgov_27JUN2023, PH_UPCSInspections_Data_dotgov_19APR2024, by = c("Inspection ID"="UPCS Inspection ID")) #new data has 6 less rows, the rest is the same, keep old data
 ```
 
 ```{r}
-nycha_scores <- scores %>% filter(pha_name == "New York City Housing Authority") %>% 
+nycha_scores <- scores23 %>% filter(pha_code == "NY005") %>% 
   mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
          pass = if_else(raw_score >= 60, T, F),
          h_s_score = toupper(str_replace_all(inspection_score, "[*0-9]", "")),
@@ -148,4 +153,7 @@ map_clean %>%
   write_csv("scores_map_dw.csv")
 
 ```
+
+
+
 
