@@ -19,21 +19,28 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 scores23 <- read_excel("PH_Inspections_data_dotgov_27JUN2023.xlsx") %>% 
-  clean_names()
+  clean_names() %>% 
+  filter(pha_code == "NY005")
 
 scores24 <- read_excel("PH_UPCSInspections_Data_dotgov_19APR2024.xlsx") %>% 
-  filter(`PHA Code` == "NY005")
+  clean_names() %>% 
+  filter(pha_code == "NY005")
+
+scores25 <- read_excel("public_housing_physical_inspection_scores_08252025.xlsx") %>% 
+  clean_names() %>% 
+  filter(pha_code == "NY005")
 
 test <- full_join(PH_Inspections_data_dotgov_27JUN2023, PH_UPCSInspections_Data_dotgov_19APR2024, by = c("Inspection ID"="UPCS Inspection ID")) #new data has 6 less rows, the rest is the same, keep old data
 ```
 
 ```{r}
-nycha_scores <- scores23 %>% filter(pha_code == "NY005") %>% 
+nycha_scores <- scores25 %>% 
   mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
          pass = if_else(raw_score >= 60, T, F),
          h_s_score = toupper(str_replace_all(inspection_score, "[*0-9]", "")),
          smoke_detectors = if_else(str_detect(inspection_score, "\\*"), "Yes", "No")
   )
+
 
 write_csv(nycha_scores, "nycha_scores.csv")
 ```
@@ -59,19 +66,46 @@ write_csv(nycha_scores_beeswarm, "scores_swarm_dw.csv")
 
 ```
 
+
 ```{r}
 
-nycha_scores %>% 
-  select(`Development Name` = development_name,
-         `Borough` = development_city,
-         `Units` = development_acc_unit_count,
-         `Overall Score` = raw_score,
-         `Health & Safety Scores` = h_s_score,
-         `Smoke Detector Deficiencies` = smoke_detectors) %>% 
-  write_csv("scores_table_dw.csv")
+#merge in PNA
+pna_23 <- read_csv("NYCHA 2023 PNA Development Results 7-1-2023(in) (1).csv") %>% 
+  clean_names()
 
+pna_dev_sum <- pna_23 %>% 
+  group_by(development) %>% 
+  summarize(need_5 = sum(x5_year_need, na.rm = T),
+            need_20 = sum(x20_year_need, na.rm = T)) %>% 
+  mutate(
+    dev_name_std = str_to_upper(development),
+    dev_name_std = str_replace_all(dev_name_std, "\\s+", " "),
+    dev_name_std = case_when(
+      development == "1010 EAST 178TH STREET" ~ "1010 E. 178TH ST.",
+      development %in% c("ALBANY", "ALBANY II") ~ "ALBANY I & II",
+      development %in% c("QUEENSBRIDGE NORTH", "QUEENSBRIDGE SOUTH") ~ "QUEENSBRIDGE",
+      development == "RED HOOK EAST" ~ "RED HOOK I (EAST)",
+      development == "RED HOOK WEST" ~ "RED HOOK II",
+      development %in% c("DOUGLASS I","DOUGLASS ADDITION") ~ "FREDERICK DOUGLASS & ADD.",
+      development %in% c("BRONX RIVER","BRONX RIVER ADDITION") ~ "BRONX RIVER & ADDITION",
+      development %in% c("MILL BROOK","MILL BROOK EXTENSION") ~ "MILL BROOK & EXTENSION",
+      development %in% c("ROOSEVELT I") ~ "ELEANOR ROOSEVELT I",
+      development == "OCEAN BAY APARTMENTS (OCEANSIDE)" ~ "OCEANBAY APARTMENTS (OCEANSIDE)",
+      development == "BEACH 41ST STREET-BEACH CHANNEL DRIVE" ~ "BCH.41 ST/BCH. CHANNEL DR",
+      development == "BERRY" ~ "GEN. CHARLES W. BERRY",
+      development == "GRANT" ~ "GENERAL GRANT",
+      development == "WASHINGTON" ~ "GEORGE WASHINGTON",
+      development == "PINK" ~ "LOUIS HEATON PINK",
+      development == "TAYLOR STREET-WYTHE AVENUE" ~ "TAYLOR ST/WYTHE AVE",
+      development == "UNITY PLAZA (SITES 4-27)" ~ "UNITY PLAZA SITES 4-27",
+      TRUE ~ dev_name_std
+    ))
+
+pna_23 %>% summarize(total_5 = sum(x5_year_need, na.rm = T), total_20 = sum(x20_year_need, na.rm = T))
 
 ```
+
+
 
 ```{r}
 
@@ -134,26 +168,50 @@ anti_join <- stringdist_join(nycha_nhpd, nycha_scores,
 
 ```{r}
 map_clean <- fuzzy_join %>% 
-  mutate(second_score = as.integer(str_replace_all(reac_score_2, "[*abc]", "")),
+  mutate(second_score = as.integer(str_replace_all(reac_score_1, "[*abc]", "")),
          second_pass = if_else(reac_score_2 >= 60, T, F),
-         second_h_s_score = toupper(str_replace_all(reac_score_2, "[*0-9]", "")),
-         second_smoke_detectors = if_else(str_detect(reac_score_2, "\\*"), "Yes", "No"),
-         third_score = as.integer(str_replace_all(reac_score_3, "[*abc]", "")),
-         third_pass = if_else(reac_score_3 >= 60, T, F),
-         third_h_s_score = toupper(str_replace_all(reac_score_3, "[*0-9]", "")),
-         third_smoke_detectors = if_else(str_detect(reac_score_3, "\\*"), "Yes", "No")
+         second_h_s_score = toupper(str_replace_all(reac_score_1, "[*0-9]", "")),
+         second_smoke_detectors = if_else(str_detect(reac_score_1, "\\*"), "Yes", "No"),
+         third_score = as.integer(str_replace_all(reac_score_2, "[*abc]", "")),
+         third_pass = if_else(reac_score_2 >= 60, T, F),
+         third_h_s_score = toupper(str_replace_all(reac_score_2, "[*0-9]", "")),
+         third_smoke_detectors = if_else(str_detect(reac_score_2, "\\*"), "Yes", "No")
   ) 
 
 map_clean %>% 
-  select(development_name, borough = development_city, development_acc_unit_count,
+  select(development_name, borough = city.x, development_acc_unit_count = total_units,
          inspection_date, raw_score, h_s_score, smoke_detectors, reac_date_2,
          second_score, second_h_s_score, second_smoke_detectors, reac_date_3,
          third_score, third_h_s_score, third_smoke_detectors,
-         latitude, longitude) %>% 
+         latitude = latitude.x, longitude=longitude.x) %>% 
   write_csv("scores_map_dw.csv")
+
+pna_join <- left_join(map_clean, pna_dev_sum, by = c("development_name" = "dev_name_std"))
+
+map_clean %>% stringdist_join(pna_dev_sum,
+          by = c("development_name" = "development"),
+          mode = "full",
+          max_dist = 3,
+          ignore_case = T,
+          distance_col = "dist") %>% 
+  group_by(development_name) %>%
+  filter(dist == min(dist))
 
 ```
 
+```{r}
+
+nycha_scores %>% 
+  select(`Development Name` = development_name,
+         `Borough` = development_city,
+         `Units` = development_acc_unit_count,
+         `Overall Score` = raw_score,
+         `Health & Safety Scores` = h_s_score,
+         `Smoke Detector Deficiencies` = smoke_detectors) %>% 
+  write_csv("scores_table_dw.csv")
+
+
+```
 
 
 
