@@ -12,6 +12,7 @@ library(readxl)
 library(janitor)
 library(stringdist)
 library(fuzzyjoin)
+library(geoclient)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -38,9 +39,23 @@ nycha_scores <- scores25 %>%
   mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
          pass = if_else(raw_score >= 60, T, F),
          h_s_score = toupper(str_replace_all(inspection_score, "[*0-9]", "")),
-         smoke_detectors = if_else(str_detect(inspection_score, "\\*"), "Yes", "No")
+         smoke_detectors = if_else(str_detect(inspection_score, "\\*"), "Yes", "No"),
+        development_name = str_replace_all(development_name, "\\.", "")
+
   )
 
+clean_23 <- scores23 %>% 
+  mutate(raw_score = as.integer(str_replace_all(inspection_score, "[*abc]", "")),
+         pass = if_else(raw_score >= 60, T, F),
+         h_s_score = toupper(str_replace_all(inspection_score, "[*0-9]", "")),
+         smoke_detectors = if_else(str_detect(inspection_score, "\\*"), "Yes", "No"),
+        development_name = str_replace_all(development_name, "\\.", "")
+
+  )
+
+clean_23 %>% count( 
+                   h_s_score
+                   )
 
 write_csv(nycha_scores, "nycha_scores.csv")
 ```
@@ -76,36 +91,29 @@ pna_23 <- read_csv("NYCHA 2023 PNA Development Results 7-1-2023(in) (1).csv") %>
 pna_dev_sum <- pna_23 %>% 
   group_by(development) %>% 
   summarize(need_5 = sum(x5_year_need, na.rm = T),
-            need_20 = sum(x20_year_need, na.rm = T)) %>% 
-  mutate(
-    dev_name_std = str_to_upper(development),
-    dev_name_std = str_replace_all(dev_name_std, "\\s+", " "),
-    dev_name_std = case_when(
-      development == "1010 EAST 178TH STREET" ~ "1010 E. 178TH ST.",
-      development %in% c("ALBANY", "ALBANY II") ~ "ALBANY I & II",
-      development %in% c("QUEENSBRIDGE NORTH", "QUEENSBRIDGE SOUTH") ~ "QUEENSBRIDGE",
-      development == "RED HOOK EAST" ~ "RED HOOK I (EAST)",
-      development == "RED HOOK WEST" ~ "RED HOOK II",
-      development %in% c("DOUGLASS I","DOUGLASS ADDITION") ~ "FREDERICK DOUGLASS & ADD.",
-      development %in% c("BRONX RIVER","BRONX RIVER ADDITION") ~ "BRONX RIVER & ADDITION",
-      development %in% c("MILL BROOK","MILL BROOK EXTENSION") ~ "MILL BROOK & EXTENSION",
-      development %in% c("ROOSEVELT I") ~ "ELEANOR ROOSEVELT I",
-      development == "OCEAN BAY APARTMENTS (OCEANSIDE)" ~ "OCEANBAY APARTMENTS (OCEANSIDE)",
-      development == "BEACH 41ST STREET-BEACH CHANNEL DRIVE" ~ "BCH.41 ST/BCH. CHANNEL DR",
-      development == "BERRY" ~ "GEN. CHARLES W. BERRY",
-      development == "GRANT" ~ "GENERAL GRANT",
-      development == "WASHINGTON" ~ "GEORGE WASHINGTON",
-      development == "PINK" ~ "LOUIS HEATON PINK",
-      development == "TAYLOR STREET-WYTHE AVENUE" ~ "TAYLOR ST/WYTHE AVE",
-      development == "UNITY PLAZA (SITES 4-27)" ~ "UNITY PLAZA SITES 4-27",
-      TRUE ~ dev_name_std
-    ))
+            need_20 = sum(x20_year_need, na.rm = T))
 
 pna_23 %>% summarize(total_5 = sum(x5_year_need, na.rm = T), total_20 = sum(x20_year_need, na.rm = T))
 
+
+pna_18 <- read_excel("Master NYCHA PNA Spread Sheet DCabrera.xlsx") %>% 
+  clean_names()
+
+pna_time <- left_join(pna_dev_sum, pna_18, by = "development")
+
+pna_time %>% count(is.na(data_as_of)) #all match!!
+
+dev_sum_clean <- pna_time %>% 
+  mutate(cap_per_unit = need_20/total_number_of_apartments,
+         geo = geo_intersection(cross_street_1 = location_street_a,
+                        cross_street_2 = location_street_b,
+                        borough = borough),
+         lat = geo$latitude,
+         long = geo$longitude) %>% 
+  select(development, need_20, total_number_of_apartments, cap_per_unit, lat, long)
+  
+
 ```
-
-
 
 ```{r}
 
@@ -115,6 +123,7 @@ nhpd_reac <-read_excel("active_ph_pbs8_nystate.xlsx") %>%
 nyc_nhpd <- filter(nhpd_reac, county %in% c("Kings", "Richmond", "New York", "Bronx", "Queens"))
 
 nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Authority", "NEW YORK CITY HOUSING AUTHORITY", "CORNELL PACE INC")) %>% 
+#mutate for the nhpd data - will revisit
   mutate(property_name = case_when(
     property_name == "RED HOOK I EAST" ~ "red hook i (east)",
     property_name == "AMSTERDAM" & nhpd_property_id == "1072768" ~ "amsterdam addition",
@@ -132,13 +141,28 @@ nycha_nhpd <- filter(nyc_nhpd, manager_name %in% c("New York City Housing Author
     property_name == "PROSPECT PLAZA SITE I" ~ "Prospect Plaza Phase I",
     property_name == "PROSPECT PLAZA II" ~ "Prospect Plaza Phase Ii",
     property_name == "TRINITY WEST HARLEM PHASE TWO LP" ~ "Randolph South",
-    
     T ~ property_name
-  ))
+  ),
+  property_name = toupper(property_name))
 
 #boulevard houses in NHPD but not hud data
 
 ```
+
+
+```{r}
+
+join1 <- left_join(nycha_scores %>% 
+                     select(development_name, inspection_score, inspection_date,
+                            latitude, longitude, county_name),
+                   nycha_nhpd, by = c("development_name"="property_name"))
+
+anti_join(nycha_scores, nycha_nhpd, by = c("development_name"="property_name"))
+
+join2 <- left_join(nycha_scores)
+
+```
+
 
 
 ```{r}
@@ -176,14 +200,14 @@ map_clean <- fuzzy_join %>%
          third_pass = if_else(reac_score_2 >= 60, T, F),
          third_h_s_score = toupper(str_replace_all(reac_score_2, "[*0-9]", "")),
          third_smoke_detectors = if_else(str_detect(reac_score_2, "\\*"), "Yes", "No")
-  ) 
-
-map_clean %>% 
+  ) %>% 
   select(development_name, borough = city.x, development_acc_unit_count = total_units,
          inspection_date, raw_score, h_s_score, smoke_detectors, reac_date_2,
          second_score, second_h_s_score, second_smoke_detectors, reac_date_3,
          third_score, third_h_s_score, third_smoke_detectors,
-         latitude = latitude.x, longitude=longitude.x) %>% 
+         latitude = latitude.x, longitude=longitude.x)
+
+map_clean %>% 
   write_csv("scores_map_dw.csv")
 
 pna_join <- left_join(map_clean, pna_dev_sum, by = c("development_name" = "dev_name_std"))
