@@ -13,6 +13,8 @@ library(janitor)
 library(stringdist)
 library(fuzzyjoin)
 library(geoclient)
+library(getarc)
+library(sf)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -89,9 +91,22 @@ pna_23 <- read_csv("NYCHA 2023 PNA Development Results 7-1-2023(in) (1).csv") %>
   clean_names()
 
 pna_dev_sum <- pna_23 %>% 
-  group_by(development) %>% 
+  group_by(development, primary_work_type) %>% 
   summarize(need_5 = sum(x5_year_need, na.rm = T),
-            need_20 = sum(x20_year_need, na.rm = T))
+            need_20 = sum(x20_year_need, na.rm = T),
+            ) %>%  
+  arrange(development, desc(need_20)) %>% 
+  ungroup() %>% 
+  group_by(development) %>% 
+  summarize(x_need_5 = sum(need_5, na.rm = T),
+            x_need_20 = sum(need_20, na.rm = T),
+            cat_1 = first(primary_work_type),
+            cat_1_amt = first(need_20),
+            cat_2 = nth(primary_work_type, 2),
+            cat_2_amt = nth(need_20, 2),
+            cat_3 = nth(primary_work_type, 3),
+            cat_3_amt = nth(need_20, 3)
+            )
 
 pna_23 %>% summarize(total_5 = sum(x5_year_need, na.rm = T), total_20 = sum(x20_year_need, na.rm = T))
 
@@ -104,16 +119,46 @@ pna_time <- left_join(pna_dev_sum, pna_18, by = "development")
 pna_time %>% count(is.na(data_as_of)) #all match!!
 
 dev_sum_clean <- pna_time %>% 
-  mutate(cap_per_unit = need_20/total_number_of_apartments,
+  mutate(cap_per_unit = x_need_20/total_number_of_apartments,
          geo = geo_intersection(cross_street_1 = location_street_a,
                         cross_street_2 = location_street_b,
-                        borough = borough),
-         lat = geo$latitude,
-         long = geo$longitude) %>% 
-  select(development, need_20, total_number_of_apartments, cap_per_unit, lat, long)
+                        borough = borough)) %>% 
+  select(development, x_need_20, total_number_of_apartments, cap_per_unit, starts_with("cat_"))
+
+dev_sum_clean %>% write_csv("pna_table.csv")
   
 
 ```
+
+
+```{r}
+nycha_dev_layer <- query_layer("https://services1.arcgis.com/0mhlGDIUKwQF6tnJ/arcgis/rest/services/NYCHA_developments_public2017/FeatureServer/0") %>% 
+                                 mutate(layer = "NYCHA")
+
+pact_dev_layer <- query_layer("https://services1.arcgis.com/0mhlGDIUKwQF6tnJ/arcgis/rest/services/20200212_RADPACT_Layer/FeatureServer/1") %>% 
+  mutate(layer = "PACT",
+         TOTAL_UNIT = TOTAL_DU)
+
+nycha_pact_sf <- bind_rows(nycha_dev_layer, pact_dev_layer) %>% 
+  st_centroid() %>% 
+  mutate(
+    long = st_coordinates(geometry)[, 1],
+    lat  = st_coordinates(geometry)[, 2]
+  ) %>% 
+  as.data.frame
+
+join_sf <- left_join(dev_sum_clean, nycha_pact_sf, by = c("development"="DEVELOPMEN")) %>% 
+  arrange(desc(cap_per_unit)) %>% 
+  mutate(cap_unit_rank = row_number()) %>%
+  arrange(desc(x_need_20)) %>% 
+  mutate(cap_rank = row_number())
+
+join_sf %>% select(development, x_need_20, cap_per_unit, BOROUGH, total_number_of_apartments, layer, long, lat, starts_with("cat_"), cap_rank, cap_unit_rank) %>% 
+  write_csv("pna_map.csv")
+  
+```
+
+
 
 ```{r}
 
